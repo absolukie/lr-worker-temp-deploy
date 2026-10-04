@@ -1725,14 +1725,40 @@ var _Room = class {
     if (!p || !p.isBot)
       return;
     var mv = E.botNextMove(G, pid);
-    if (!mv)
+    if (!mv) {
+      this._log("bot_stuck", "bot " + pid + " has no move; forcing turn", "autoPlay");
+      this._forceTurnAdvance(pid);
+      await this._changed();
       return;
+    }
     var wasDiscard = mv.t === "discard";
-    if (!E.applyMove(G, pid, mv).ok)
+    var key = T.turnNo + ":" + T.turnPid + ":" + T.turnStep;
+    if (!E.applyMove(G, pid, mv).ok) {
+      this._log("bot_stuck", "bot " + pid + " move " + mv.t + " failed; forcing turn", "autoPlay");
+      this._forceTurnAdvance(pid);
+      await this._changed();
       return;
+    }
+    if (G.table.phase === "play" && G.table.turnNo + ":" + G.table.turnPid + ":" + G.table.turnStep === key) {
+      this._log("bot_stuck", "bot " + pid + " turn " + key + " did not advance; forcing", "autoPlay");
+      this._forceTurnAdvance(pid);
+    }
     await this._changed();
     if (wasDiscard && G.table.phase === "play")
       await this._startBuyRound(pid, mv.card);
+  }
+  _forceTurnAdvance(pid) {
+    var S = this.state, G = S.game, T = G.table;
+    var np = E.nextPid(G, pid);
+    if (np && np !== pid) {
+      T.turnPid = np;
+      T.turnStep = "draw";
+      T.turnNo++;
+    } else {
+      T.phase = "dealEnd";
+      T.goerPid = pid;
+    }
+    S.action = null;
   }
   async _autoPlay(pid, step, key) {
     var S = this.state, G = S.game;
@@ -1761,15 +1787,7 @@ var _Room = class {
         "turn " + key + " did not advance; forcing next player",
         "autoPlay"
       );
-      var np = E.nextPid(G, pid);
-      if (np && np !== pid) {
-        G.table.turnPid = np;
-        G.table.turnStep = "draw";
-        G.table.turnNo++;
-      } else {
-        G.table.phase = "dealEnd";
-        G.table.goerPid = pid;
-      }
+      this._forceTurnAdvance(pid);
     }
     await this._changed();
     if (autoD && G.table.phase === "play")
